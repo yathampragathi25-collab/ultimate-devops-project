@@ -1,0 +1,91 @@
+name: Product Catalog CI/CD
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/product-catalog/**'
+      - 'kubernetes/productcatalog/**'
+      - '.github/workflows/ci-cd.yaml'
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/product-catalog
+
+jobs:
+  test:
+    name: Test Product Catalog
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Download dependencies
+        working-directory: src/product-catalog
+        run: go mod download
+
+      - name: Run tests
+        working-directory: src/product-catalog
+        run: go test ./...
+
+  build-and-push:
+    name: Build and Push Product Catalog
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./src/product-catalog
+          file: ./src/product-catalog/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Update Kubernetes image
+        run: |
+          sed -i "s|image: .*product-catalog:.*|image: ${IMAGE_NAME}:${GITHUB_SHA}|" \
+            kubernetes/productcatalog/deploy.yaml
+
+      - name: Commit Kubernetes update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add kubernetes/productcatalog/deploy.yaml
+
+          if git diff --cached --quiet; then
+            echo "No Kubernetes image change required."
+            exit 0
+          fi
+
+          git commit -m "chore: deploy product-catalog ${GITHUB_SHA} [skip ci]"
+          git push
