@@ -33,6 +33,16 @@ module "eks" {
 
       min_size     = 1
       max_size     = 2
+      desired_size = 2
+
+      capacity_type = "ON_DEMAND"
+    }
+
+    argo = {
+      instance_types = ["m7i-flex.large"]
+
+      min_size     = 1
+      max_size     = 2
       desired_size = 1
 
       capacity_type = "ON_DEMAND"
